@@ -39,12 +39,14 @@ public class Menu {
 		return selection;
 	}
 	
-	public void add(String s) {
+	public Menu add(String s) {
 		list.add(s);
+		return this;
 	}
 	
-	public void add(ArrayList<String> strings) {
+	public Menu add(ArrayList<String> strings) {
 		list.addAll(strings);
+		return this;
 	}
 	
 	public ArrayList<String> getList() {

@@ -179,6 +179,10 @@ public class ArduinoSerial implements AutoCloseable {
 		}
 		return data;
 	}
+
+	public void clear() {
+		buffer.clear();
+	}
 	
 	/**
 	 * Blocks the thread until a certain byte gets sent over the serial. Use it with caution!
@@ -222,6 +226,10 @@ public class ArduinoSerial implements AutoCloseable {
 		write(message);
 		waitFor(Thread.currentThread());
 		return readBytes();
+	}
+
+	public void waitForSignal() {
+		waitFor(Thread.currentThread());
 	}
 
 	public void close() throws IOException {

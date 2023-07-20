@@ -32,7 +32,7 @@ public class Input {
 	 */
 	public static String askString() {		
 		String answerString = null;
-		answerString = SCANNER.next();
+		answerString = SCANNER.nextLine();
 		return answerString;
 	}
 	
@@ -66,11 +66,7 @@ public class Input {
 		while (wrong) {
 			try {
 				String next = SCANNER.next();
-				if(next.startsWith("0x")) {
-					next = next.substring(2);
-					x = HexFormat.fromHexDigitsToLong(next);
-				} else
-					x = Long.parseLong(next);
+				x = Integer.decode(next);
 				wrong = false;
 			} catch (IllegalFormatException e) {
 				System.err.println("This is not a number");

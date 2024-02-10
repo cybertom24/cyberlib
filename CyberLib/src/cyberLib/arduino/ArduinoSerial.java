@@ -1,22 +1,24 @@
 package cyberLib.arduino;
 
-import java.io.BufferedOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.util.ArrayList;
 import com.fazecast.jSerialComm.*;
 
+/**
+ * Trying to make it Win/Linux compatible
+ * Win: the USB port is defined as "COM*" where * is the number of the port
+ * Linux: USB port are defined as "/dev/ttyUSB*" where * is the number
+ */
+
+
 public class ArduinoSerial implements AutoCloseable {
 	
-	private boolean debug = false;
+	private final boolean debug = false;
 	
-	private SerialPort serialPort;
-	private ArrayList<SerialListener> listeners;
-	private ArrayList<byte[]> buffer;
-	private BufferedOutputStream outputStream;
-	
-	private boolean waiting = false;
-	//private byte toFind = 0;
-	private Object objHalted;
+	private final SerialPort serialPort;
+	private final ArrayList<SerialListener> listeners;
+	public final ArrayList<Byte> inputBuffer;
+	private final OutputStream outputStream;
 	
 	/**
 	 * 
@@ -27,7 +29,7 @@ public class ArduinoSerial implements AutoCloseable {
 	 */
 	public ArduinoSerial(String portString, BaudRates baudRate) throws SerialPortTimeoutException {
 		listeners = new ArrayList<>();
-		buffer = new ArrayList<>();
+		inputBuffer = new ArrayList<>();
 
 		serialPort = SerialPort.getCommPort(portString);
 		serialPort.setComPortParameters(baudRate.rate, 8, 1, 0); // Default for arduino
@@ -36,7 +38,7 @@ public class ArduinoSerial implements AutoCloseable {
 		if (!serialPort.openPort())
 			throw new SerialPortTimeoutException("Port " + portString + " failed to open");
 		
-		outputStream = new BufferedOutputStream(serialPort.getOutputStream());
+		outputStream = serialPort.getOutputStream();
 
 		serialPort.addDataListener(new SerialPortDataListener() {
 
@@ -53,183 +55,94 @@ public class ArduinoSerial implements AutoCloseable {
 			}
 		});
 		
-		addListener(new SerialListener() {
-			
-			@Override
-			public void onDataArrived(byte[] data) {
-				buffer.add(data);
-				
-				if(waiting /*&& data[0] == toFind*/) {
-					// Release the waiting thread
-					synchronized (objHalted) {
-						objHalted.notify();
-						waiting = false;
-					}
-				}
-				
-				if(debug) {
-					for(byte b : data) 
-						System.out.printf("\nArrivato: 0x%x", b);
-					System.out.println();
-				}
+		addListener(data -> {
+			synchronized (inputBuffer) {
+				for (byte b : data)
+					inputBuffer.add(b);
+			}
+
+			if(debug) {
+				for(byte b : data)
+					System.out.printf("\nArrivato: 0x%x", b);
+				System.out.println();
 			}
 		});
 	}
-	
+
+	public OutputStream getOutputStream() {
+		return serialPort.getOutputStream();
+	}
+
+	public InputStream getInputStream() {
+		return serialPort.getInputStream();
+	}
+
 	public boolean isOpen() {
 		return serialPort.isOpen();
 	}
-	
+
+	public void write(byte[] message) {
+		try {
+			outputStream.write(message);
+			outputStream.flush();
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
 	/**
-	 * @implNote Use with caution! No checks for null pointer or port closed are
-	 *           made!
-	 * @param data
+	 * How many bytes are ready to be read
+	 * @return
 	 */
-	private void _writeSingle(byte data) {
-		try {
-			outputStream.write(data);
-			outputStream.flush();
-		} catch (IOException e) {
-			e.printStackTrace();
+	public int available() {
+		// Richiama la porta così si sveglia e controlla che siano arrivati nuovi pacchetti
+		serialPort.bytesAvailable();
+		return inputBuffer.size();
+	}
+
+	public byte[] readAllBytes() {
+		byte[] data = new byte[inputBuffer.size()];
+		for (int i = 0; i < data.length; i++) {
+			data[i] = inputBuffer.get(i);
 		}
-	}
-	
-	private void _writeMultiple(byte[] data) {
-		try {
-			outputStream.write(data);
-			outputStream.flush();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-	}
-	
-	private void _addToBuffer(byte data) {
-		try {
-			outputStream.write(data);
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-	}
-	
-	private void _flush() {
-		try {
-			outputStream.flush();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-	}
-	
-	public void write(byte b) {
-		_writeSingle(b);
+		inputBuffer.clear();
+		return data;
 	}
 
-	public void write(int i) {
-		Integer x = i;
-		write(x.byteValue());
-	}
+	/**
+	 * Tries to read length bytes from the buffer. The bytes read are less or equal to length. Check the length of the array returned
+	 * @param length how many bytes to read
+	 * @return byte array
+	 */
+	public byte[] readBytes(int length) {
+		length = Math.min(length, inputBuffer.size());
+		if (length == 0)
+			return new byte[0];
 
-	public void write(byte[] data) {
-		_writeMultiple(data);
-	}
-	
-	public void write(Byte[] data) {
-		for(byte b : data)
-			_addToBuffer(b);
-		_flush();
-	}
-
-	public void write(int[] data) {
-		for (Integer i : data)
-			_addToBuffer(i.byteValue());
-		_flush();
-	}
-
-	public void write(char c) {
-		write((byte) c);
-	}
-
-	public void write(char[] data) {
-		for (char c : data)
-			_addToBuffer((byte) c);
-		_flush();
-	}
-
-	public void write(String s) {
-		char[] charArray = s.toCharArray();
-		for (char c : charArray)
-			_addToBuffer((byte) c);
-		_flush();
-	}
-	
-	public void write(ArrayList<Byte> list) {
-		for(int i = 0; i < list.size(); i++)
-			_addToBuffer(list.get(i));
-		_flush();
-	}
-
-	public boolean available() {
-		return !buffer.isEmpty();
-	}
-
-	public byte[] readBytes() {
-		byte[] data = null;
-		if(!buffer.isEmpty()) {
-			data = buffer.get(0);
-			buffer.remove(0);
+		byte[] data = new byte[length];
+		for (int i = 0; i < length; i++) {
+			data[i] = inputBuffer.remove(0);
 		}
 		return data;
 	}
 
-	public void clear() {
-		buffer.clear();
-	}
-	
-	/**
-	 * Blocks the thread until a certain byte gets sent over the serial. Use it with caution!
-	 * @param toFind The byte to look for
-	 * @param who The object who needs to be halted
-	 */
-	public void waitFor(byte toFind, Object who) {
-		waiting = true;
-		//this.toFind = toFind;
-		objHalted = who;
-		
-		// Get the lock on the object to halt
-		synchronized (objHalted) {
-			try {
-				// Let it wait
-				objHalted.wait();
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-				waiting = false;
-			}
-		}
-	}
-	
-	public void waitFor(Object who) {
-		waiting = true;
-		objHalted = who;
-		
-		// Get the lock on the object to halt
-		synchronized (objHalted) {
-			try {
-				// Let it wait
-				objHalted.wait();
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-				waiting = false;
-			}
-		}
-	}
-	
-	public byte[] awaitResponse(byte[] message) {
-		write(message);
-		waitFor(Thread.currentThread());
-		return readBytes();
+	public byte read() {
+		if(inputBuffer.isEmpty())
+			return 0;
+		return inputBuffer.remove(0);
 	}
 
-	public void waitForSignal() {
-		waitFor(Thread.currentThread());
+	public void clear() {
+		inputBuffer.clear();
+	}
+	
+	public byte[] awaitResponse(byte[] message, int packetLength) {
+		write(message);
+
+		while(available() < packetLength)
+			;
+
+		return readBytes(packetLength);
 	}
 
 	public void close() throws IOException {
